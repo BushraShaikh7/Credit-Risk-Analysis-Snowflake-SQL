@@ -1,0 +1,211 @@
+-- ============================================================
+-- CREDIT RISK ANALYSIS — SNOWFLAKE SQL
+-- Dataset: CS_TRAINING (150,000 borrowers)
+-- Source: Kaggle Give Me Some Credit
+-- Goal: Identify which borrowers are most likely to default
+-- ============================================================
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 1: How many borrowers defaulted?
+-- We count borrowers grouped by the target column.
+-- 0 = did not default, 1 = defaulted.
+-- This gives us our baseline default rate for the whole dataset.
+-- ------------------------------------------------------------
+
+SELECT "SeriousDlqin2yrs", COUNT(*)
+FROM CS_TRAINING
+GROUP BY "SeriousDlqin2yrs";
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 2: Does being 90 days late predict default?
+-- For each value of NumberOfTimes90DaysLate, we show how many
+-- borrowers fall in that group and their average default rate.
+-- AVG on a 0/1 column returns the default rate as a decimal.
+-- e.g. 0.337 = 33.7% default rate.
+-- ------------------------------------------------------------
+
+SELECT "NumberOfTimes90DaysLate", COUNT(*), AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+GROUP BY "NumberOfTimes90DaysLate"
+ORDER BY "NumberOfTimes90DaysLate";
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 3: Does a higher debt ratio predict default?
+-- We group borrowers into debt ratio buckets using CASE WHEN.
+-- DebtRatio = monthly debt payments divided by monthly income.
+-- Values over 10 are flagged as likely data errors.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "DebtRatio" < 0.3 THEN 'Low (under 0.3)'
+WHEN "DebtRatio" < 1 THEN 'Medium (0.3 to 1)'
+WHEN "DebtRatio" < 10 THEN 'High (1 to 10)'
+ELSE 'Extreme (flagged)' END AS debt_group,
+COUNT(*),
+AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+GROUP BY CASE
+WHEN "DebtRatio" < 0.3 THEN 'Low (under 0.3)'
+WHEN "DebtRatio" < 1 THEN 'Medium (0.3 to 1)'
+WHEN "DebtRatio" < 10 THEN 'High (1 to 10)'
+ELSE 'Extreme (flagged)' END;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 4: Do lower income borrowers default more?
+-- We bucket borrowers by monthly income into three groups
+-- and check whether default rate rises as income falls.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "MonthlyIncome" < 3000 THEN 'Under 3000'
+WHEN "MonthlyIncome" < 7000 THEN 'Middle Income'
+ELSE 'High income' END AS income_group,
+COUNT(*),
+AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+GROUP BY CASE
+WHEN "MonthlyIncome" < 3000 THEN 'Under 3000'
+WHEN "MonthlyIncome" < 7000 THEN 'Middle Income'
+ELSE 'High income' END;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 5: Do older borrowers have more open credit lines?
+-- We group by age and check average number of open credit
+-- accounts. This measures credit history depth, not default risk.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "age" < 20 THEN 'Under 20'
+WHEN "age" < 30 THEN '20 to 30'
+WHEN "age" < 40 THEN '30 to 40'
+WHEN "age" < 50 THEN '40 to 50'
+ELSE 'Over 50' END AS age_group,
+AVG("NumberOfOpenCreditLinesAndLoans")
+FROM CS_TRAINING
+GROUP BY CASE
+WHEN "age" < 20 THEN 'Under 20'
+WHEN "age" < 30 THEN '20 to 30'
+WHEN "age" < 40 THEN '30 to 40'
+WHEN "age" < 50 THEN '40 to 50'
+ELSE 'Over 50' END;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 6: Once a borrower has a late payment, does income
+-- still predict default?
+-- We filter to borrowers with at least one 90-day late payment
+-- using WHERE, then group by income bucket.
+-- Finding: income becomes a very weak predictor once late
+-- payments are present. The late payment dominates.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "MonthlyIncome" < 3000 THEN 'Under 3000'
+WHEN "MonthlyIncome" < 7000 THEN 'Middle Income'
+ELSE 'High income' END AS income_group,
+COUNT(*),
+AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+WHERE "NumberOfTimes90DaysLate" >= 1
+GROUP BY CASE
+WHEN "MonthlyIncome" < 3000 THEN 'Under 3000'
+WHEN "MonthlyIncome" < 7000 THEN 'Middle Income'
+ELSE 'High income' END;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 7: Does high credit utilisation predict default?
+-- RevolvingUtilizationOfUnsecuredLines = how much of their
+-- available credit limit a borrower is currently using.
+-- 0.8 means they are using 80% of their credit limit.
+-- Higher utilisation = less financial buffer = more risk.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "RevolvingUtilizationOfUnsecuredLines" <= 0.3 THEN 'Low (under 0.3)'
+WHEN "RevolvingUtilizationOfUnsecuredLines" < 0.5 THEN 'Medium (0.3 to 0.5)'
+WHEN "RevolvingUtilizationOfUnsecuredLines" < 0.8 THEN 'High (0.5 to 0.8)'
+ELSE 'Very High (over 0.8)' END AS utilisation_group,
+COUNT(*),
+AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+GROUP BY CASE
+WHEN "RevolvingUtilizationOfUnsecuredLines" <= 0.3 THEN 'Low (under 0.3)'
+WHEN "RevolvingUtilizationOfUnsecuredLines" < 0.5 THEN 'Medium (0.3 to 0.5)'
+WHEN "RevolvingUtilizationOfUnsecuredLines" < 0.8 THEN 'High (0.5 to 0.8)'
+ELSE 'Very High (over 0.8)' END;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 8: What is the riskiest borrower profile?
+-- We combine the two strongest predictors: late payment history
+-- AND high credit utilisation.
+-- Result: 8,338 borrowers defaulting at 41.6% — six times
+-- the overall average of 6.7%.
+-- ------------------------------------------------------------
+
+SELECT COUNT(*), AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+WHERE "NumberOfTimes90DaysLate" >= 1
+AND "RevolvingUtilizationOfUnsecuredLines" > 0.8;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 9: What is the safest borrower profile?
+-- The opposite of Challenge 8: zero late payments and
+-- low credit utilisation.
+-- Result: 91,336 borrowers defaulting at just 1.8%.
+-- The 23x gap between Challenge 8 and Challenge 9 is the
+-- headline finding of this entire analysis.
+-- ------------------------------------------------------------
+
+SELECT COUNT(*), AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+WHERE "NumberOfTimes90DaysLate" = 0
+AND "RevolvingUtilizationOfUnsecuredLines" <= 0.3;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 10: How much money is actually at risk?
+-- We estimate monthly debt payments as DebtRatio * MonthlyIncome
+-- for the riskiest group identified in Challenge 8.
+-- Note: borrowers with NULL MonthlyIncome are excluded
+-- automatically by Snowflake, reducing the count from 8,338
+-- to 5,098.
+-- ------------------------------------------------------------
+
+SELECT COUNT(*),
+AVG("DebtRatio" * "MonthlyIncome"),
+SUM("DebtRatio" * "MonthlyIncome")
+FROM CS_TRAINING
+WHERE "NumberOfTimes90DaysLate" >= 1
+AND "RevolvingUtilizationOfUnsecuredLines" > 0.8;
+
+
+-- ------------------------------------------------------------
+-- CHALLENGE 11: Does age predict default?
+-- We group by age bucket and check default rate per group.
+-- Finding: younger borrowers default significantly more often.
+-- Under-40 = 10.4% vs over-60 = 3.1%.
+-- Note: age should not be used as a standalone denial reason
+-- due to age discrimination laws. Use as a supporting signal only.
+-- ------------------------------------------------------------
+
+SELECT CASE
+WHEN "age" <= 40 THEN 'Under 40'
+WHEN "age" < 50 THEN 'Age group 40-50'
+WHEN "age" < 60 THEN 'Age group 50-60'
+ELSE 'Over 60' END AS age_group,
+COUNT(*),
+AVG("SeriousDlqin2yrs")
+FROM CS_TRAINING
+GROUP BY CASE
+WHEN "age" <= 40 THEN 'Under 40'
+WHEN "age" < 50 THEN 'Age group 40-50'
+WHEN "age" < 60 THEN 'Age group 50-60'
+ELSE 'Over 60' END;
